@@ -36,7 +36,7 @@ function parseDate(dateStr) {
 
 function calculateDaysSinceLastOrder(lastOrderDate) {
   const lastOrder = parseDate(lastOrderDate);
-  const currentDate = new Date('2025-05-08');
+  const currentDate = new Date();
   const diffTime = Math.abs(currentDate - lastOrder);
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 }
