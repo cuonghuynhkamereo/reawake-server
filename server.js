@@ -3,7 +3,7 @@ const { google } = require('googleapis');
 const cors = require('cors');
 
 const app = express();
-app.use(cors({ origin: process.env.FRONTEND_URL || 'https://your-frontend.onrender.com' })); // Cập nhật origin sau khi deploy frontend
+app.use(cors({ origin: process.env.FRONTEND_URL || 'https://reawake-web.onrender.com' })); // Cập nhật origin sau khi deploy frontend
 app.use(express.json());
 
 const SPREADSHEET_ID = '1BUGQrNXqfWftJQlzzMj6umJz7yGeNAkGJnzji3zY2sc';
