@@ -1,6 +1,8 @@
 const express = require('express');
 const { google } = require('googleapis');
 const cors = require('cors');
+const NodeCache = require('node-cache');
+const cache = new NodeCache({ stdTTL: 3600 }); // Cache 1 giờ
 
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL || 'https://reawake-web.onrender.com' })); // Cập nhật origin sau khi deploy frontend
@@ -43,12 +45,14 @@ function calculateDaysSinceLastOrder(lastOrderDate) {
 
 app.post('/login', async (req, res) => {
   const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ error: 'Email is required' });
-  }
+  if (!email) return res.status(400).json({ error: 'Email is required' });
 
   try {
     const sheets = await getSheetsClient();
+    const cacheKey = `login_${email}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Authentication!A:K'
@@ -63,11 +67,9 @@ app.post('/login', async (req, res) => {
       }
     }
 
-    if (isActive) {
-      res.json({ success: true });
-    } else {
-      res.status(401).json({ error: 'Email not found or account not active' });
-    }
+    const result = isActive ? { success: true } : { error: 'Email not found or account not active' };
+    cache.set(cacheKey, result);
+    res.json(result);
   } catch (error) {
     console.error('Error checking email:', error);
     res.status(500).json({ error: 'Failed to check email', details: error.message });
@@ -76,12 +78,13 @@ app.post('/login', async (req, res) => {
 
 app.post('/home', async (req, res) => {
   const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ error: 'Email is required' });
-  }
+  if (!email) return res.status(400).json({ error: 'Email is required' });
 
   try {
     const sheets = await getSheetsClient();
+    const cacheKey = `home_${email}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
 
     const picCode = email.split('@')[0];
     const authResponse = await sheets.spreadsheets.values.get({
@@ -103,9 +106,7 @@ app.post('/home', async (req, res) => {
       }
     }
 
-    if (!picInfo) {
-      return res.status(404).json({ error: 'Email not found in Authentication' });
-    }
+    if (!picInfo) return res.status(404).json({ error: 'Email not found in Authentication' });
 
     const decenResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
@@ -113,11 +114,7 @@ app.post('/home', async (req, res) => {
     });
     const decenRows = decenResponse.data.values || [];
     const userDecen = decenRows.find(row => row[0] === picCode);
-    if (userDecen) {
-      picInfo.subteam = userDecen[1] || 'N/A';
-    } else {
-      picInfo.subteam = 'N/A';
-    }
+    picInfo.subteam = userDecen ? userDecen[1] || 'N/A' : 'N/A';
 
     const storeResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
@@ -128,38 +125,26 @@ app.post('/home', async (req, res) => {
 
     const role = userDecen ? userDecen[2] : 'Member';
     if (role === 'Leader') {
-      const subteamPICs = decenRows
-        .filter(row => row[1] === picInfo.subteam && row[0])
-        .map(row => row[0]);
-      console.log(`Leader ${picCode} - Subteam: ${picInfo.subteam}, PICs: ${subteamPICs.join(', ')}`);
-
-      stores = storeRows
-        .filter(row => row[5] && subteamPICs.includes(row[5]))
-        .map(row => ({
-          storeId: row[0] || '',
-          storeName: row[1] || '',
-          buyerId: row[2] || '',
-          fullAddress: row[9] || '',
-          lastOrderDate: row[11] || '',
-          finalCurrentPIC: row[5] || '',
-          statusChurnThisMonth: row[12] || '',
-          noDaysNoBuy: calculateDaysSinceLastOrder(row[11])
-        }));
-      console.log(`Total customers for Leader ${picCode}: ${stores.length}`);
+      const subteamPICs = decenRows.filter(row => row[1] === picInfo.subteam && row[0]).map(row => row[0]);
+      stores = storeRows.filter(row => row[5] && subteamPICs.includes(row[5])).map(row => ({
+        storeId: row[0] || '',
+        storeName: row[1] || '',
+        buyerId: row[2] || '',
+        fullAddress: row[9] || '',
+        lastOrderDate: row[11] || '',
+        finalCurrentPIC: row[5] || '',
+        statusChurnThisMonth: row[12] || ''
+      }));
     } else {
-      stores = storeRows
-        .filter(row => row[5] === picCode)
-        .map(row => ({
-          storeId: row[0] || '',
-          storeName: row[1] || '',
-          buyerId: row[2] || '',
-          fullAddress: row[9] || '',
-          lastOrderDate: row[11] || '',
-          finalCurrentPIC: row[5] || '',
-          statusChurnThisMonth: row[12] || '',
-          noDaysNoBuy: calculateDaysSinceLastOrder(row[11])
-        }));
-      console.log(`Total customers for Member ${picCode}: ${stores.length}`);
+      stores = storeRows.filter(row => row[5] === picCode).map(row => ({
+        storeId: row[0] || '',
+        storeName: row[1] || '',
+        buyerId: row[2] || '',
+        fullAddress: row[9] || '',
+        lastOrderDate: row[11] || '',
+        finalCurrentPIC: row[5] || '',
+        statusChurnThisMonth: row[12] || ''
+      }));
     }
 
     stores.sort((a, b) => {
@@ -168,7 +153,9 @@ app.post('/home', async (req, res) => {
       return dateB - dateA;
     });
 
-    res.json({ picInfo, stores });
+    const result = { picInfo, stores };
+    cache.set(cacheKey, result);
+    res.json(result);
   } catch (error) {
     console.error('Error fetching data:', error);
     res.status(500).json({ error: 'Failed to fetch data', details: error.message });
@@ -185,59 +172,16 @@ app.post('/submit', async (req, res) => {
   const sheetName = type === 'Churn Database' ? 'Churn Database' : 'Active Database';
   const sheetRange = type === 'Churn Database' ? 'Churn Database!A:J' : 'Active Database!A:I';
   const values = type === 'Churn Database'
-    ? [
-        storeId,
-        storeName || '',
-        contactDate,
-        PIC,
-        subteam,
-        typeOfContact,
-        action,
-        note || '',
-        whyNotReawaken || '',
-        churnMonthLastOrderDate
-      ]
-    : [
-        storeId,
-        storeName || '',
-        contactDate,
-        PIC,
-        subteam,
-        typeOfContact,
-        action,
-        note || '',
-        activeMonth
-      ];
+    ? [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', whyNotReawaken || '', churnMonthLastOrderDate]
+    : [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', activeMonth];
 
   try {
     const sheets = await getSheetsClient();
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID,
-    });
-    const sheetExists = spreadsheet.data.sheets.some(sheet => sheet.properties.title === sheetName);
-    if (!sheetExists) {
-      return res.status(400).json({ error: `Sheet '${sheetName}' does not exist` });
-    }
-
-    const existingDataResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A${2}:I`
-    });
-    const existingData = existingDataResponse.data.values || [];
-    const isDuplicate = existingData.some(row =>
-      row[0] === storeId && row[2] === contactDate && row[6] === action
-    );
-    if (isDuplicate) {
-      return res.json({ success: true });
-    }
-
     const response = await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: sheetRange,
       valueInputOption: 'RAW',
-      resource: {
-        values: [values]
-      }
+      resource: { values: [values] }
     });
 
     if (!response.data.updates || response.data.updates.updatedRows !== 1) {
@@ -245,6 +189,9 @@ app.post('/submit', async (req, res) => {
       return res.status(500).json({ error: `Failed to write data to ${sheetName}: No rows updated` });
     }
 
+    // Clear cache for related endpoints
+    cache.del(`home_${email}`);
+    cache.del(`progress_${email}`);
     res.json({ success: true });
   } catch (error) {
     console.error(`Error writing data to ${sheetName}:`, error);
@@ -254,11 +201,13 @@ app.post('/submit', async (req, res) => {
 
 app.post('/progress', async (req, res) => {
   const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ error: 'Email is required' });
-  }
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+
   try {
     const sheets = await getSheetsClient();
+    const cacheKey = `progress_${email}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
 
     const churnHistoryResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
@@ -286,9 +235,7 @@ app.post('/progress', async (req, res) => {
     for (let i = 1; i < activeHistoryRows.length; i++) {
       const storeId = activeHistoryRows[i][0];
       if (!activeHistoryByStore[storeId]) activeHistoryByStore[storeId] = [];
-      activeHistoryByStore[storeId].push({
-        activeMonth: activeHistoryRows[i][1] || ''
-      });
+      activeHistoryByStore[storeId].push({ activeMonth: activeHistoryRows[i][1] || '' });
     }
 
     const churnDatabaseResponse = await sheets.spreadsheets.values.get({
@@ -324,15 +271,11 @@ app.post('/progress', async (req, res) => {
     const storeRows = storeResponse.data.values || [];
     if (role === 'Leader') {
       storeRows.forEach(row => {
-        if (row[5] && subteamPICs.includes(row[5])) {
-          accessibleStoreIds.add(row[0]);
-        }
+        if (row[5] && subteamPICs.includes(row[5])) accessibleStoreIds.add(row[0]);
       });
     } else {
       storeRows.forEach(row => {
-        if (row[5] === picCode) {
-          accessibleStoreIds.add(row[0]);
-        }
+        if (row[5] === picCode) accessibleStoreIds.add(row[0]);
       });
     }
 
@@ -428,6 +371,7 @@ app.post('/progress', async (req, res) => {
       });
     });
 
+    cache.set(cacheKey, progressByStore);
     res.json(progressByStore);
   } catch (error) {
     console.error('Error fetching progress:', error);
@@ -437,12 +381,14 @@ app.post('/progress', async (req, res) => {
 
 app.post('/active-history', async (req, res) => {
   const { storeId } = req.body;
-  if (!storeId) {
-    return res.status(400).json({ error: 'Store ID is required' });
-  }
+  if (!storeId) return res.status(400).json({ error: 'Store ID is required' });
 
   try {
     const sheets = await getSheetsClient();
+    const cacheKey = `active_history_${storeId}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const activeHistoryResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Ex Active History!A:B'
@@ -460,6 +406,7 @@ app.post('/active-history', async (req, res) => {
         return dateB - dateA;
       });
 
+    cache.set(cacheKey, storeActiveHistory);
     res.json(storeActiveHistory);
   } catch (error) {
     console.error('Error fetching active history:', error);
@@ -470,6 +417,10 @@ app.post('/active-history', async (req, res) => {
 app.get('/dropdown-churn-actions', async (req, res) => {
   try {
     const sheets = await getSheetsClient();
+    const cacheKey = 'dropdown_churn_actions';
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Dropdown Churn Action!A:B'
@@ -479,6 +430,7 @@ app.get('/dropdown-churn-actions', async (req, res) => {
       typeOfChurn: row[0] || '',
       churnAction: row[1] || ''
     }));
+    cache.set(cacheKey, churnActions);
     res.json(churnActions);
   } catch (error) {
     console.error('Error fetching dropdown churn actions:', error);
@@ -489,12 +441,17 @@ app.get('/dropdown-churn-actions', async (req, res) => {
 app.get('/dropdown-active-actions', async (req, res) => {
   try {
     const sheets = await getSheetsClient();
+    const cacheKey = 'dropdown_active_actions';
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Dropdown Active Action!A:A'
     });
     const rows = response.data.values || [];
     const activeActions = rows.slice(1).map(row => row[0] || '');
+    cache.set(cacheKey, activeActions);
     res.json(activeActions);
   } catch (error) {
     console.error('Error fetching dropdown active actions:', error);
@@ -505,6 +462,10 @@ app.get('/dropdown-active-actions', async (req, res) => {
 app.get('/dropdown-why-reasons', async (req, res) => {
   try {
     const sheets = await getSheetsClient();
+    const cacheKey = 'dropdown_why_reasons';
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Dropdown Why!A:B'
@@ -514,6 +475,7 @@ app.get('/dropdown-why-reasons', async (req, res) => {
       typeOfChurn: row[0] || '',
       whyNotReawaken: row[1] || ''
     }));
+    cache.set(cacheKey, whyReasons);
     res.json(whyReasons);
   } catch (error) {
     console.error('Error fetching dropdown why reasons:', error);
