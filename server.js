@@ -5,7 +5,8 @@ const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 3600 }); // Cache 1 giờ
 
 const app = express();
-app.use(cors({ origin: [process.env.FRONTEND_URL || 'https://reawake-web.onrender.com', 'https://keep-alive-service-gl65.onrender.com'] }));
+// app.use(cors({ origin: [process.env.FRONTEND_URL || 'https://reawake-web.onrender.com', 'https://keep-alive-service-gl65.onrender.com'] }));
+app.use(cors({ origin: '*' })); // Cho phép tất cả các nguồn
 app.use(express.json());
 
 const SPREADSHEET_ID = '1BUGQrNXqfWftJQlzzMj6umJz7yGeNAkGJnzji3zY2sc';
