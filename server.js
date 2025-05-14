@@ -5,7 +5,7 @@ const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 3600 }); // Cache 1 giờ
 
 const app = express();
-app.use(cors({ origin: process.env.FRONTEND_URL || 'https://reawake-web.onrender.com' })); // Cập nhật origin sau khi deploy frontend
+app.use(cors({ origin: [process.env.FRONTEND_URL || 'https://reawake-web.onrender.com', 'https://keep-alive-service.onrender.com'] }));
 app.use(express.json());
 
 const SPREADSHEET_ID = '1BUGQrNXqfWftJQlzzMj6umJz7yGeNAkGJnzji3zY2sc';
@@ -481,6 +481,11 @@ app.get('/dropdown-why-reasons', async (req, res) => {
     console.error('Error fetching dropdown why reasons:', error);
     res.status(500).json({ error: 'Failed to fetch dropdown why reasons', details: error.message });
   }
+});
+
+// Keep-alive endpoint to prevent backend from sleeping
+app.get('/keep-alive', (req, res) => {
+  res.status(204).end(); // Trả về status 204 (No Content)
 });
 
 const PORT = process.env.PORT || 3000;
