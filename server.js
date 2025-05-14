@@ -5,7 +5,6 @@ const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 3600 }); // Cache 1 giờ
 
 const app = express();
-// app.use(cors({ origin: [process.env.FRONTEND_URL || 'https://reawake-web.onrender.com', 'https://keep-alive-service-gl65.onrender.com'] }));
 app.use(cors({ origin: '*' })); // Cho phép tất cả các nguồn
 app.use(express.json());
 
@@ -42,6 +41,56 @@ function calculateDaysSinceLastOrder(lastOrderDate) {
   const currentDate = new Date();
   const diffTime = Math.abs(currentDate - lastOrder);
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+async function checkStoreAccess(sheets, email, storeId) {
+  const picCode = email.split('@')[0];
+  const decenResponse = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Ex Decentralization!A:F'
+  });
+  const decenRows = decenResponse.data.values || [];
+  const userDecen = decenRows.find(row => row[0] === picCode);
+  if (!userDecen) return false;
+
+  const role = userDecen[2] || 'Member';
+  const subteam = userDecen[1] || 'N/A';
+  const region = userDecen[3] || 'N/A';
+  const team = userDecen[4] || 'N/A';
+  const concat = userDecen[5] || 'N/A';
+
+  const storeResponse = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Ex Store_info!A:M'
+  });
+  const storeRows = storeResponse.data.values || [];
+  const store = storeRows.find(row => row[0] === storeId);
+  if (!store) return false;
+
+  const storePIC = store[5]; // finalCurrentPIC
+
+  if (role === 'Member') {
+    return storePIC === picCode;
+  } else if (role === 'Leader') {
+    const subteamPICs = decenRows.filter(row => row[1] === subteam && row[0]).map(row => row[0]);
+    return subteamPICs.includes(storePIC);
+  } else if (role === 'Manager') {
+    if (region === 'ALL') {
+      return true;
+    } else if (region === 'HCM') {
+      const concatPICs = decenRows.filter(row => row[5] === concat).map(row => row[0]);
+      return concatPICs.includes(storePIC);
+    } else if (region === 'HN') {
+      if (team === 'ALL') {
+        const hnPICs = decenRows.filter(row => row[3] === 'HN').map(row => row[0]);
+        return hnPICs.includes(storePIC);
+      } else {
+        const concatPICs = decenRows.filter(row => row[5] === concat).map(row => row[0]);
+        return concatPICs.includes(storePIC);
+      }
+    }
+  }
+  return false;
 }
 
 app.post('/login', async (req, res) => {
@@ -111,23 +160,45 @@ app.post('/home', async (req, res) => {
 
     const decenResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Ex Decentralization!A:C'
+      range: 'Ex Decentralization!A:F'
     });
     const decenRows = decenResponse.data.values || [];
     const userDecen = decenRows.find(row => row[0] === picCode);
-    picInfo.subteam = userDecen ? userDecen[1] || 'N/A' : 'N/A';
+    if (userDecen) {
+      picInfo.subteam = userDecen[1] || 'N/A';
+      picInfo.role = userDecen[2] || 'Member';
+      picInfo.region = userDecen[3] || 'N/A';
+      picInfo.team = userDecen[4] || 'N/A';
+      picInfo.concat = userDecen[5] || 'N/A';
+    } else {
+      picInfo.subteam = 'N/A';
+      picInfo.role = 'Member';
+      picInfo.region = 'N/A';
+      picInfo.team = 'N/A';
+      picInfo.concat = 'N/A';
+    }
 
     const storeResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Ex Store_info!A:M'
     });
     const storeRows = storeResponse.data.values || [];
+    const dataRows = storeRows.slice(1); // Bỏ qua dòng header
     let stores = [];
 
-    const role = userDecen ? userDecen[2] : 'Member';
-    if (role === 'Leader') {
+    if (picInfo.role === 'Member') {
+      stores = dataRows.filter(row => row[5] === picCode).map(row => ({
+        storeId: row[0] || '',
+        storeName: row[1] || '',
+        buyerId: row[2] || '',
+        fullAddress: row[9] || '',
+        lastOrderDate: row[11] || '',
+        finalCurrentPIC: row[5] || '',
+        statusChurnThisMonth: row[12] || ''
+      }));
+    } else if (picInfo.role === 'Leader') {
       const subteamPICs = decenRows.filter(row => row[1] === picInfo.subteam && row[0]).map(row => row[0]);
-      stores = storeRows.filter(row => row[5] && subteamPICs.includes(row[5])).map(row => ({
+      stores = dataRows.filter(row => row[5] && subteamPICs.includes(row[5])).map(row => ({
         storeId: row[0] || '',
         storeName: row[1] || '',
         buyerId: row[2] || '',
@@ -136,16 +207,53 @@ app.post('/home', async (req, res) => {
         finalCurrentPIC: row[5] || '',
         statusChurnThisMonth: row[12] || ''
       }));
-    } else {
-      stores = storeRows.filter(row => row[5] === picCode).map(row => ({
-        storeId: row[0] || '',
-        storeName: row[1] || '',
-        buyerId: row[2] || '',
-        fullAddress: row[9] || '',
-        lastOrderDate: row[11] || '',
-        finalCurrentPIC: row[5] || '',
-        statusChurnThisMonth: row[12] || ''
-      }));
+    } else if (picInfo.role === 'Manager') {
+      if (picInfo.region === 'ALL') {
+        stores = dataRows.map(row => ({
+          storeId: row[0] || '',
+          storeName: row[1] || '',
+          buyerId: row[2] || '',
+          fullAddress: row[9] || '',
+          lastOrderDate: row[11] || '',
+          finalCurrentPIC: row[5] || '',
+          statusChurnThisMonth: row[12] || ''
+        }));
+      } else if (picInfo.region === 'HCM') {
+        const concatPICs = decenRows.filter(row => row[5] === picInfo.concat).map(row => row[0]);
+        stores = dataRows.filter(row => row[5] && concatPICs.includes(row[5])).map(row => ({
+          storeId: row[0] || '',
+          storeName: row[1] || '',
+          buyerId: row[2] || '',
+          fullAddress: row[9] || '',
+          lastOrderDate: row[11] || '',
+          finalCurrentPIC: row[5] || '',
+          statusChurnThisMonth: row[12] || ''
+        }));
+      } else if (picInfo.region === 'HN') {
+        if (picInfo.team === 'ALL') {
+          const hnPICs = decenRows.filter(row => row[3] === 'HN').map(row => row[0]);
+          stores = dataRows.filter(row => row[5] && hnPICs.includes(row[5])).map(row => ({
+            storeId: row[0] || '',
+            storeName: row[1] || '',
+            buyerId: row[2] || '',
+            fullAddress: row[9] || '',
+            lastOrderDate: row[11] || '',
+            finalCurrentPIC: row[5] || '',
+            statusChurnThisMonth: row[12] || ''
+          }));
+        } else {
+          const concatPICs = decenRows.filter(row => row[5] === picInfo.concat).map(row => row[0]);
+          stores = dataRows.filter(row => row[5] && concatPICs.includes(row[5])).map(row => ({
+            storeId: row[0] || '',
+            storeName: row[1] || '',
+            buyerId: row[2] || '',
+            fullAddress: row[9] || '',
+            lastOrderDate: row[11] || '',
+            finalCurrentPIC: row[5] || '',
+            statusChurnThisMonth: row[12] || ''
+          }));
+        }
+      }
     }
 
     stores.sort((a, b) => {
@@ -170,14 +278,21 @@ app.post('/submit', async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const sheetName = type === 'Churn Database' ? 'Churn Database' : 'Active Database';
-  const sheetRange = type === 'Churn Database' ? 'Churn Database!A:J' : 'Active Database!A:I';
-  const values = type === 'Churn Database'
-    ? [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', whyNotReawaken || '', churnMonthLastOrderDate]
-    : [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', activeMonth];
-
   try {
     const sheets = await getSheetsClient();
+
+    // Kiểm tra quyền truy cập store
+    const hasAccess = await checkStoreAccess(sheets, email, storeId);
+    if (!hasAccess) {
+      return res.status(403).json({ error: 'You do not have permission to record actions for this store' });
+    }
+
+    const sheetName = type === 'Churn Database' ? 'Churn Database' : 'Active Database';
+    const sheetRange = type === 'Churn Database' ? 'Churn Database!A:J' : 'Active Database!A:I';
+    const values = type === 'Churn Database'
+      ? [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', whyNotReawaken || '', churnMonthLastOrderDate]
+      : [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', activeMonth];
+
     const response = await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: sheetRange,
@@ -254,15 +369,17 @@ app.post('/progress', async (req, res) => {
     const picCode = email.split('@')[0];
     const decenResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Ex Decentralization!A:C'
+      range: 'Ex Decentralization!A:F'
     });
     const decenRows = decenResponse.data.values || [];
     const userDecen = decenRows.find(row => row[0] === picCode);
     const subteam = userDecen ? userDecen[1] : null;
     const role = userDecen ? userDecen[2] : null;
+    const region = userDecen ? userDecen[3] : null;
+    const team = userDecen ? userDecen[4] : null;
+    const concat = userDecen ? userDecen[5] : null;
 
     const actionsByStore = {};
-    const subteamPICs = role === 'Leader' && subteam ? decenRows.filter(row => row[1] === subteam && row[0]).map(row => row[0]) : [picCode];
     const accessibleStoreIds = new Set();
 
     const storeResponse = await sheets.spreadsheets.values.get({
@@ -270,14 +387,36 @@ app.post('/progress', async (req, res) => {
       range: 'Ex Store_info!A:M'
     });
     const storeRows = storeResponse.data.values || [];
-    if (role === 'Leader') {
-      storeRows.forEach(row => {
-        if (row[5] && subteamPICs.includes(row[5])) accessibleStoreIds.add(row[0]);
-      });
-    } else {
-      storeRows.forEach(row => {
+    if (role === 'Member') {
+      storeRows.slice(1).forEach(row => { // Bỏ qua dòng header
         if (row[5] === picCode) accessibleStoreIds.add(row[0]);
       });
+    } else if (role === 'Leader') {
+      const subteamPICs = decenRows.filter(row => row[1] === subteam && row[0]).map(row => row[0]);
+      storeRows.slice(1).forEach(row => { // Bỏ qua dòng header
+        if (row[5] && subteamPICs.includes(row[5])) accessibleStoreIds.add(row[0]);
+      });
+    } else if (role === 'Manager') {
+      if (region === 'ALL') {
+        storeRows.slice(1).forEach(row => accessibleStoreIds.add(row[0])); // Bỏ qua dòng header
+      } else if (region === 'HCM') {
+        const concatPICs = decenRows.filter(row => row[5] === concat).map(row => row[0]);
+        storeRows.slice(1).forEach(row => { // Bỏ qua dòng header
+          if (row[5] && concatPICs.includes(row[5])) accessibleStoreIds.add(row[0]);
+        });
+      } else if (region === 'HN') {
+        if (team === 'ALL') {
+          const hnPICs = decenRows.filter(row => row[3] === 'HN').map(row => row[0]);
+          storeRows.slice(1).forEach(row => { // Bỏ qua dòng header
+            if (row[5] && hnPICs.includes(row[5])) accessibleStoreIds.add(row[0]);
+          });
+        } else {
+          const concatPICs = decenRows.filter(row => row[5] === concat).map(row => row[0]);
+          storeRows.slice(1).forEach(row => { // Bỏ qua dòng header
+            if (row[5] && concatPICs.includes(row[5])) accessibleStoreIds.add(row[0]);
+          });
+        }
+      }
     }
 
     for (let i = 1; i < churnDatabaseRows.length; i++) {
