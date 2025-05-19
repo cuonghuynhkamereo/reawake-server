@@ -126,6 +126,67 @@ app.post('/login', async (req, res) => {
   }
 });
 
+app.post('/manual-login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: 'Email and password are required' });
+  }
+
+  try {
+    const sheets = await getSheetsClient();
+    
+    const authResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Authentication!A:N'  // Mở rộng range để bao gồm cột PASSWORD (N)
+    });
+    
+    const authRows = authResponse.data.values || [];
+    let userFound = false;
+    let isActive = false;
+    let correctPassword = false;
+    let picInfo = null;
+    
+    for (let i = 1; i < authRows.length; i++) {
+      const row = authRows[i];
+      if (row[2] === email) {  // Cột C chứa email
+        userFound = true;
+        isActive = row[10] === 'Active';  // Cột K chứa STATUS
+        correctPassword = row[13] === password;  // Cột N chứa PASSWORD
+        
+        if (isActive && correctPassword) {
+          picInfo = {
+            fullName: row[3] || 'N/A',  // Cột D chứa NAME
+            email: row[2] || 'N/A'      // Cột C chứa EMAIL
+          };
+          break;
+        }
+      }
+    }
+    
+    if (!userFound) {
+      return res.status(404).json({ success: false, error: 'Account not found' });
+    }
+    
+    if (!isActive) {
+      return res.status(403).json({ success: false, error: 'Account is not active' });
+    }
+    
+    if (!correctPassword) {
+      return res.status(401).json({ success: false, error: 'Incorrect password' });
+    }
+    
+    // Xử lý tiếp tục như endpoint login thông thường
+    // Lấy thông tin về quyền truy cập vào các store
+    // Tương tự như trong endpoint app.post('/login', ...)
+    
+    // Nếu mọi thứ OK
+    return res.json({ success: true, picInfo });
+  } catch (error) {
+    console.error('Error validating manual login:', error);
+    res.status(500).json({ success: false, error: 'Failed to validate credentials', details: error.message });
+  }
+});
+
 app.post('/home', async (req, res) => {
   const { email } = req.body;
   const force = req.query.force === 'true';
