@@ -128,13 +128,17 @@ app.post('/login', async (req, res) => {
 
 app.post('/home', async (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email is required' });
-
-  try {
-    const sheets = await getSheetsClient();
-    const cacheKey = `home_${email}`;
+  const force = req.query.force === 'true';
+  const cacheKey = `home_${email}`;
+  
+  // Nếu force=true thì bỏ qua cache
+  if (!force) {
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
+  }
+  
+  try {
+    const sheets = await getSheetsClient();
 
     const picCode = email.split('@')[0];
     const authResponse = await sheets.spreadsheets.values.get({
@@ -317,13 +321,17 @@ app.post('/submit', async (req, res) => {
 
 app.post('/progress', async (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email is required' });
-
-  try {
-    const sheets = await getSheetsClient();
-    const cacheKey = `progress_${email}`;
+  const force = req.query.force === 'true';
+  const cacheKey = `progress_${email}`;
+  
+  // Nếu force=true thì bỏ qua cache
+  if (!force) {
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
+  }
+  
+  try {
+    const sheets = await getSheetsClient();
 
     const churnHistoryResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
