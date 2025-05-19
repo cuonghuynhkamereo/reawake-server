@@ -132,12 +132,9 @@ app.post('/home', async (req, res) => {
 
   try {
     const sheets = await getSheetsClient();
-    const force = req.query.force === 'true';
     const cacheKey = `home_${email}`;
-    if (!force) {
-      const cached = cache.get(cacheKey);
-      if (cached) return res.json(cached);
-    }
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
 
     const picCode = email.split('@')[0];
     const authResponse = await sheets.spreadsheets.values.get({
@@ -324,12 +321,9 @@ app.post('/progress', async (req, res) => {
 
   try {
     const sheets = await getSheetsClient();
-    const force = req.query.force === 'true';
     const cacheKey = `progress_${email}`;
-    if (!force) {
-      const cached = cache.get(cacheKey);
-      if (cached) return res.json(cached);
-    }
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
 
     const churnHistoryResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
