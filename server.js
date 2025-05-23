@@ -337,12 +337,13 @@ app.post('/home', async (req, res) => {
 });
 
 app.post('/submit', async (req, res) => {
-  const { email, storeId, storeName, action, contactDate, PIC, subteam, typeOfContact, note, whyNotReawaken, churnMonthLastOrderDate, activeMonth } = req.body;
+  const { email, storeId, storeName, action, contactDate, PIC, subteam, typeOfContact, note, whyNotReawaken, churnMonthLastOrderDate, activeMonth, linkHubspot } = req.body;
   const type = req.query.type;
   if (!email || !storeId || !contactDate || !typeOfContact || !action || !type) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
+  let sheetName = ''; // Sửa: khai báo ngoài try
   try {
     const sheets = await getSheetsClient();
 
@@ -352,11 +353,11 @@ app.post('/submit', async (req, res) => {
       return res.status(403).json({ error: 'You do not have permission to record actions for this store' });
     }
 
-    const sheetName = type === 'Churn Database' ? 'Churn Database' : 'Active Database';
-    const sheetRange = type === 'Churn Database' ? 'Churn Database!A:J' : 'Active Database!A:I';
+    sheetName = type === 'Churn Database' ? 'Churn Database' : 'Active Database';
+    const sheetRange = type === 'Churn Database' ? 'Churn Database!A:K' : 'Active Database!A:J';
     const values = type === 'Churn Database'
-      ? [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', whyNotReawaken || '', churnMonthLastOrderDate]
-      : [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', activeMonth];
+      ? [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', whyNotReawaken || '', churnMonthLastOrderDate, linkHubspot || '']
+      : [storeId, storeName || '', contactDate, PIC, subteam, typeOfContact, action, note || '', activeMonth, linkHubspot || ''];
 
     const response = await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
@@ -375,7 +376,7 @@ app.post('/submit', async (req, res) => {
     cache.del(`progress_${email}`);
     res.json({ success: true });
   } catch (error) {
-    console.error(`Error writing data to ${sheetName}:`, error);
+    console.error(`Error writing data to ${sheetName}:`, error); // sheetName luôn tồn tại
     res.status(error.code === 'ECONNRESET' ? 503 : 500).json({ error: `Failed to write data to ${sheetName}: ${error.message}` });
   }
 });
