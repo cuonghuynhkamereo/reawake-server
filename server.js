@@ -6,7 +6,7 @@ const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 3600 }); // Cache 1 giờ
 
 const app = express();
-app.use(cors({ origin: '*' })); // Cho phép tất cả các nguồn
+app.use(cors({ origin: ['https://reawake-web.onrender.com', 'http://localhost:3000'] })); // Cho phép tất cả các nguồn
 app.use(express.json());
 
 const SPREADSHEET_ID = '1BUGQrNXqfWftJQlzzMj6umJz7yGeNAkGJnzji3zY2sc';
